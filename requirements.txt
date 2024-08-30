@@ -1,0 +1,8 @@
+Flask
+Flask-PyMongo
+pymongo
+bcrypt
+PyJWT
+datetime
+pytest
+Flask-Cors
