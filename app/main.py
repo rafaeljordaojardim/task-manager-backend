@@ -3,13 +3,19 @@ from app.models import User, JWT, Task
 from functools import wraps
 from datetime import datetime
 
-# JWT Configuration
-JWT_EXPIRY_SECONDS = 3600  # 1 hour
 
-def create_routes(app, mongo):
-    JWT_SECRET_KEY = app.secret_key 
+
+# JWT Configuration
+ACCESS_TOKEN_EXPIRY_SECONDS = 300  # 1 hour
+REFRESH_TOKEN_EXPIRY_SECONDS = 604800  # 7 days
+
+def create_routes(app, mongo, limiter):
+    JWT_SECRET_KEY = app.secret_key
+    
+
     """Define your Flask routes here."""
     @app.route('/api/signup', methods=['POST'])
+    @limiter.limit("20/minute")
     def signup():
         data = request.get_json()
         username = data.get('username')
@@ -25,6 +31,7 @@ def create_routes(app, mongo):
         return jsonify({'message': 'User created successfully' }), 201
 
     @app.route('/api/login', methods=['POST'])
+    @limiter.limit("20/minute")
     def login():
         data = request.get_json()
         username = data.get('username')
@@ -33,11 +40,37 @@ def create_routes(app, mongo):
         user = User.find_by_username(mongo.db, username)
 
         if user and user.check_password(password):
-            access_token = JWT.generate_jwt(user._id, JWT_SECRET_KEY, JWT_EXPIRY_SECONDS)
-            return jsonify({'access_token': access_token, 'user': user.username}), 200
+            access_token = JWT.generate_jwt(user._id, JWT_SECRET_KEY, ACCESS_TOKEN_EXPIRY_SECONDS)
+            refresh_token = JWT.generate_jwt(user._id, JWT_SECRET_KEY, REFRESH_TOKEN_EXPIRY_SECONDS)
+
+            return jsonify({
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'user': user.username
+            }), 200
         else:
             return jsonify({'message': 'Invalid username or password'}), 401
 
+    @app.route('/api/refresh', methods=['POST'])
+    def refresh():
+        """
+        Endpoint to refresh the access token using the refresh token.
+        """
+        refresh_token = request.headers.get('Authorization').split(" ")[1]
+        if not refresh_token:
+            return jsonify({'message': 'Refresh token is missing'}), 401
+
+        data = JWT.decode_jwt(refresh_token, JWT_SECRET_KEY)
+
+        if data is None:
+            return jsonify({'message': 'Invalid refresh token'}), 401
+
+        current_user = User.find_one(mongo.db, data['sub'])
+        if not current_user:
+            return jsonify({'message': 'User not found'}), 404
+
+        access_token = JWT.generate_jwt(current_user._id, JWT_SECRET_KEY, ACCESS_TOKEN_EXPIRY_SECONDS)
+        return jsonify({'access_token': access_token}), 200
 
     # Decorator to protect routes with JWT
     def token_required(f):
@@ -61,11 +94,13 @@ def create_routes(app, mongo):
     # Example protected route
     @app.route('/api/protected')
     @token_required
+    @limiter.limit("20/minute")
     def protected(current_user):
         return jsonify({'message': str(current_user._id)}), 200
 
     @app.route('/api/tasks', methods=['POST'])
     @token_required
+    @limiter.limit("20/minute")
     def create_task(current_user):
         data = request.get_json()
         title = data.get('title')
@@ -86,6 +121,7 @@ def create_routes(app, mongo):
 
     @app.route('/api/tasks', methods=['GET'])
     @token_required
+    @limiter.limit("20/minute")
     def get_tasks(current_user):
         tasks = Task.find_by_user_id(mongo.db, current_user._id)
         task_list = []
@@ -103,6 +139,7 @@ def create_routes(app, mongo):
 
     @app.route('/api/tasks/<task_id>', methods=['GET'])
     @token_required
+    @limiter.limit("20/minute")
     def get_task(current_user, task_id):
         task = Task.find_one(mongo.db, task_id)
         if task and task.user_id == current_user._id:
@@ -115,6 +152,7 @@ def create_routes(app, mongo):
 
     @app.route('/api/tasks/<task_id>', methods=['PUT'])
     @token_required
+    @limiter.limit("20/minute")
     def update_task(current_user, task_id):
         task = Task.find_one(mongo.db, task_id)
         if task and task.user_id == current_user._id:
@@ -137,6 +175,7 @@ def create_routes(app, mongo):
 
     @app.route('/api/tasks/<task_id>', methods=['DELETE'])
     @token_required
+    @limiter.limit("20/minute")
     def delete_task(current_user, task_id):
         task = Task.find_one(mongo.db, task_id)
         if task and task.user_id == current_user._id:

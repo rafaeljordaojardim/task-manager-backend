@@ -6,3 +6,4 @@ PyJWT
 datetime
 pytest
 Flask-Cors
+Flask-Limiter
