@@ -39,15 +39,15 @@ class TestAPI:
     def test_signup(self):
         """Test user signup."""
         data = {'username': 'testuser', 'password': 'testpassword'}
-        response = self.client.post('/api/signup', json=data)
+        response = self.client.post('/api/auth/signup', json=data)
         assert response.status_code == 201
         assert 'User created successfully' in response.json['message']
 
     def test_signup_existing_user(self):
         """Test signup with an existing username."""
         data = {'username': 'testuser', 'password': 'testpassword'}
-        self.client.post('/api/signup', json=data)  # Create the user first
-        response = self.client.post('/api/signup', json=data)  # Try to create again
+        self.client.post('/api/auth/signup', json=data)  # Create the user first
+        response = self.client.post('/api/auth/signup', json=data)  # Try to create again
         assert response.status_code == 409
         assert 'Username already exists' in response.json['message']
 
@@ -55,11 +55,11 @@ class TestAPI:
         """Test user login and retrieving tasks."""
         # 1. Signup a new user
         signup_data = {'username': 'testuser', 'password': 'testpassword'}
-        self.client.post('/api/signup', json=signup_data)
+        self.client.post('/api/auth/signup', json=signup_data)
 
         # 2. Login the user
         login_data = {'username': 'testuser', 'password': 'testpassword'}
-        login_response = self.client.post('/api/login', json=login_data)
+        login_response = self.client.post('/api/auth/login', json=login_data)
         assert login_response.status_code == 200
         access_token = login_response.json['access_token']
 
@@ -86,22 +86,22 @@ class TestAPI:
         # Simulate a request context for rate limiting OUTSIDE the loop
         for i in range(20):
             signup_data = {'username': 'testuser1', 'password': 'testpassword'}
-            response = self.client.post('/api/signup', json=signup_data)
+            response = self.client.post('/api/auth/signup', json=signup_data)
 
         signup_data = {'username': 'testuser1', 'password': 'testpassword'}
-        response = self.client.post('/api/signup', json=signup_data)
+        response = self.client.post('/api/auth/signup', json=signup_data)
         assert response.status_code == 429             
 
         # # Wait for a minute for the rate limit to reset
         time.sleep(61)  # Ensure enough delay
 
         # Simulate another request context after the delay
-        with app.test_request_context('/api/signup', method='POST'):
+        with app.test_request_context('/api/auth/signup', method='POST'):
             # Set a fake remote address for testing
             app.config['RATELIMIT_KEY_FUNC'] = lambda: '127.0.0.1'
             signup_data = {'username': 'testuser4', 'password': 'testpassword'}
             # The next request after the rate limit reset should succeed
             with self.limiter.limit("1/minute"):
-                response = self.client.post('/api/signup', json=signup_data)
+                response = self.client.post('/api/auth/signup', json=signup_data)
                 assert response.status_code == 201
 # ... Add more tests for other endpoints (get_task, update_task, delete_task) ...

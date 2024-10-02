@@ -6,15 +6,14 @@ from datetime import datetime
 
 
 # JWT Configuration
-ACCESS_TOKEN_EXPIRY_SECONDS = 300  # 1 hour
+ACCESS_TOKEN_EXPIRY_SECONDS = 3600  # 1 hour
 REFRESH_TOKEN_EXPIRY_SECONDS = 604800  # 7 days
 
 def create_routes(app, mongo, limiter):
     JWT_SECRET_KEY = app.secret_key
-    
 
     """Define your Flask routes here."""
-    @app.route('/api/signup', methods=['POST'])
+    @app.route('/api/auth/signup', methods=['POST'])
     @limiter.limit("20/minute")
     def signup():
         data = request.get_json()
@@ -30,7 +29,7 @@ def create_routes(app, mongo, limiter):
         User.create_user(mongo.db, username, password)
         return jsonify({'message': 'User created successfully' }), 201
 
-    @app.route('/api/login', methods=['POST'])
+    @app.route('/api/auth/login', methods=['POST'])
     @limiter.limit("20/minute")
     def login():
         data = request.get_json()
@@ -43,6 +42,8 @@ def create_routes(app, mongo, limiter):
             access_token = JWT.generate_jwt(user._id, JWT_SECRET_KEY, ACCESS_TOKEN_EXPIRY_SECONDS)
             refresh_token = JWT.generate_jwt(user._id, JWT_SECRET_KEY, REFRESH_TOKEN_EXPIRY_SECONDS)
 
+            user.add_refresh_token(mongo.db, refresh_token)
+
             return jsonify({
                 'access_token': access_token,
                 'refresh_token': refresh_token,
@@ -51,7 +52,7 @@ def create_routes(app, mongo, limiter):
         else:
             return jsonify({'message': 'Invalid username or password'}), 401
 
-    @app.route('/api/refresh', methods=['POST'])
+    @app.route('/api/auth/refresh', methods=['POST'])
     def refresh():
         """
         Endpoint to refresh the access token using the refresh token.
@@ -66,11 +67,33 @@ def create_routes(app, mongo, limiter):
             return jsonify({'message': 'Invalid refresh token'}), 401
 
         current_user = User.find_one(mongo.db, data['sub'])
-        if not current_user:
-            return jsonify({'message': 'User not found'}), 404
+        if not current_user or not current_user.has_refresh_token(mongo.db, refresh_token):
+            return jsonify({'message': 'Invalid refresh token'}), 401
 
         access_token = JWT.generate_jwt(current_user._id, JWT_SECRET_KEY, ACCESS_TOKEN_EXPIRY_SECONDS)
         return jsonify({'access_token': access_token}), 200
+
+    @app.route('/api/auth/logout', methods=['POST'])
+    def logout():
+        """
+        Endpoint to logout the access token using the refresh token.
+        """
+        refresh_token = request.headers.get('Authorization').split(" ")[1]
+        if not refresh_token:
+            return jsonify({'message': 'Refresh token is missing'}), 401
+
+        data = JWT.decode_jwt(refresh_token, JWT_SECRET_KEY)
+
+        if data is None:
+            return jsonify({'message': 'Invalid refresh token'}), 401
+
+        current_user = User.find_one(mongo.db, data['sub'])
+        if not current_user:
+            return jsonify({'message': 'User not found'}), 404
+
+        current_user.remove_refresh_token(mongo.db, refresh_token)
+        return jsonify({}), 200
+
 
     # Decorator to protect routes with JWT
     def token_required(f):
@@ -90,6 +113,16 @@ def create_routes(app, mongo, limiter):
             current_user = User.find_one(mongo.db, data['sub'])
             return f(current_user, *args, **kwargs)
         return decorated
+
+    @app.route('/api/auth/revoke_all', methods=['POST'])
+    @token_required  # Assuming you have the token_required decorator
+    def revoke_all_tokens(current_user):
+        """
+        Endpoint to revoke all refresh tokens for a user.
+        This is typically used when a user changes their password.
+        """
+        current_user.remove_refresh_tokens(mongo.db)
+        return jsonify({'message': 'All refresh tokens revoked'}), 200
 
     # Example protected route
     @app.route('/api/protected')

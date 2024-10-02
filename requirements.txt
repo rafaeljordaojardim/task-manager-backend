@@ -4,6 +4,7 @@ pymongo
 bcrypt
 PyJWT
 datetime
+mongomock
 pytest
 Flask-Cors
 Flask-Limiter

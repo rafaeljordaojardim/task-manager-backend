@@ -4,15 +4,16 @@ import jwt
 import datetime
 import sys
 class User:
-    def __init__(self, username, password, _id=None):
+    def __init__(self, username, password, _id=None, refresh_tokens=None):
         self.username = username
         self.password = password
         self._id = _id
+        self.refresh_tokens = refresh_tokens if refresh_tokens else []
 
     @staticmethod
     def create_user(db, username, password):  # Pass db here
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        user_id = db.users.insert_one({"username": username, "password": hashed_password }).inserted_id
+        user_id = db.users.insert_one({"username": username, "password": hashed_password, "refresh_tokens": [] }).inserted_id
         return user_id
 
     @staticmethod
@@ -20,7 +21,7 @@ class User:
         user_data = db.users.find_one({"username": username})
         print(user_data, file=sys.stderr)
         if user_data:
-            return User(user_data.get("username"), user_data.get("password"), user_data.get('_id'))  # Pass db
+            return User(user_data.get("username"), user_data.get("password"), user_data.get('_id'), user_data.get('refresh_tokens'))  # Pass db
         return None
 
     @staticmethod
@@ -29,11 +30,31 @@ class User:
         user_data = db.users.find_one({"_id": objectId})
         print(user_data, file=sys.stderr)
         if user_data:
-            return User(user_data["username"], user_data["password"], user_data["_id"])  # Pass db
+            return User(user_data["username"], user_data["password"], user_data["_id"], user_data.get('refresh_tokens'))  # Pass db
         return None
 
     def check_password(self, password):
         return bcrypt.checkpw(password.encode('utf-8'), self.password)
+    
+    def add_refresh_token(self, db, token):
+        hashed_token = bcrypt.hashpw(token.encode('utf-8'), bcrypt.gensalt())
+        self.refresh_tokens.append(hashed_token)
+        db.users.update_one({"_id": self._id}, {"$set": {"refresh_tokens": self.refresh_tokens}})
+
+    def remove_refresh_token(self, db, token):
+        if token in self.refresh_tokens:
+            self.refresh_tokens.remove(token)
+            db.users.update_one({"_id": self._id}, {"$set": {"refresh_tokens": self.refresh_tokens}})
+    
+    def remove_refresh_tokens(self, db):
+        db.users.update_one({"_id": self._id}, {"$set": {"refresh_tokens": []}})
+
+    def has_refresh_token(self, db, token):
+        for stored_token in self.refresh_tokens:
+            if bcrypt.checkpw(token.encode('utf-8'), stored_token):
+                return True
+        return False
+    
 
 class Task:
     def __init__(self, title, description, user_id, due_date=None, status="pending", _id=None):
